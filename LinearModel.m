@@ -305,3 +305,8 @@ disp('Vse simulacije končane.');
 
 
 
+
+
+
+
+
