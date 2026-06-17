@@ -1,0 +1,318 @@
+%%
+close all
+clear
+clc
+
+pendulum_process_obf([], 0); 
+
+Ts = 0.06;              % Čas vzorčenja (s)
+T_sim = 100;             % Skupni čas simulacije (s)
+N = ceil(T_sim / Ts);   % Število korakov
+t_vec = (0:N-1)' * Ts;  % Časovni vektor
+
+n = (0:N-1);
+k = 3/N;
+u_vec = k * n;
+
+
+disp('Začetek simulacije...');
+y_vec = pendulum_process_obf(u_vec, Ts);
+disp('Simulacija končana.');
+
+
+kot_rad = y_vec(:, 1);
+hitrost_rad_s = y_vec(:, 2);
+kot_stopinje = kot_rad * 180 / pi;
+
+figure('Name', 'Simulacija nihala', 'Color', 'w');
+
+subplot(2, 1, 1);
+plot(t_vec, u_vec', 'LineWidth', 1.2);
+ylabel('Navor (Nm)');
+title('Vhodni signal');
+grid on;
+
+subplot(2, 1, 2);
+plot(t_vec, kot_stopinje, 'LineWidth', 1.2);
+hold on;
+yline(10, 'r--', 'Spodnja meja (10°)');
+yline(100, 'r--', 'Zgornja meja (100°)');
+ylabel('Kot (°)');
+title('Izhodni kot');
+grid on;
+ylim([0, 110]);
+
+
+figure
+plot(u_vec,rad2deg(y_vec(:,1)) ,"*")
+hold on;
+yline(10, 'r--', 'Spodnja meja (10°)');
+yline(100, 'r--', 'Zgornja meja (100°)');
+ylabel('Kot (°)');
+title('Izhodni kot');
+grid on
+
+%% GK Optimization Loop (Updating given variables directly)
+
+xTrain = u_vec';
+yTrain = y_vec(:,1);
+
+numRules = 5;
+joint = [xTrain, yTrain];
+[numSamples, numDims] = size(joint);
+fuzziness = 2.0;
+clusterVolume = 1.0;
+regularisation = 1e-6;
+maxIterations = 200;
+tolerance = 1e-6;
+exponent = 2.0 / (fuzziness - 1.0);
+
+rng(0);
+membership = rand(numRules, numSamples);
+membership = membership ./ sum(membership, 1);
+centersXY = zeros(numRules, numDims);
+covariances = repmat(eye(numDims), 1, 1, numRules);
+squaredDistance = zeros(numRules, numSamples);
+
+for iter = 1:maxIterations
+    old_centers = centersXY;
+    
+    % 1. Compute Fuzzy Covariances
+    for i = 1:numRules
+        v = centersXY(i, :)';
+        diffs = joint' - v; % joint data is (numSamples x 2), transpose it to (2 x N)
+        weights = membership(i, :) .^ fuzziness;
+        
+        numerator = (diffs .* weights) * diffs';
+        denominator = sum(weights);
+        
+        covariances(:, :, i) = numerator / denominator;
+    end
+    
+    % 2. Compute Norm Matrices & Squared Distances
+    for i = 1:numRules
+        v = centersXY(i, :)';
+        Fi = covariances(:, :, i);
+        
+        Fi_reg = Fi + regularisation * eye(numDims); 
+        Ai = (clusterVolume * det(Fi_reg))^(1/numDims) * inv(Fi_reg);
+        
+        diffs = joint' - v;
+        squaredDistance(i, :) = sum((diffs' * Ai) .* diffs', 2)';
+    end
+    
+    % 3. Update Membership Matrix
+    dist_mod = squaredDistance + 1e-10;
+    for i = 1:numRules
+        membership(i, :) = sum((dist_mod(i, :) ./ dist_mod) .^ (1 / (fuzziness - 1)), 1);
+    end
+    membership = 1 ./ membership;
+    
+    % 4. Update Cluster Centers
+    for i = 1:numRules
+        weights = membership(i, :) .^ fuzziness;
+        centersXY(i, :) = (joint' * weights' / sum(weights))';
+    end
+    
+    % 5. Check Convergence
+    if max(abs(centersXY - old_centers), [], 'all') < tolerance
+        fprintf('GK converged at iteration %d\n', iter);
+        break;
+    end
+end
+
+%% ===== Membership on training data only =====
+
+% centers (1D projection from GK clusters)
+centers = centersXY(:,1);
+
+% estimate sigma (same idea as yours)
+sorted_centers = sort(centers);
+sigma = mean(diff(sorted_centers)) / 2;
+
+numRules = length(centers);
+numSamples = length(xTrain);
+
+% Gaussian memberships (unnormalized)
+muTrain = zeros(numRules, numSamples);
+
+for i = 1:numRules
+    muTrain(i,:) = exp(-(xTrain - centers(i)).^2 / (2*sigma^2));
+end
+
+% normalize memberships
+phiTrain = muTrain ./ sum(muTrain,1);
+
+% ===== PLOT memberships =====
+
+figure('Name','Train Memberships','Color','w');
+hold on;
+
+ruleColors = lines(numRules);
+
+for i = 1:numRules
+    plot(xTrain, phiTrain(i,:), 'LineWidth', 1.2, ...
+        'Color', ruleColors(i,:), ...
+        'DisplayName', sprintf('Rule %d', i));
+end
+
+xlabel('xTrain');
+ylabel('Membership degree');
+title('Normalized Gaussian Memberships (Training Set)');
+grid on;
+legend('Location','best');
+
+%%
+% ===== Hard assignment from memberships =====
+[~, hardAssign] = max(phiTrain, [], 1);
+ruleColors = lines(numRules);
+
+% ===== Plot xTrain vs yTrain colored by rule =====
+figure('Name','Training data colored by membership','Color','w');
+hold on;
+
+% 1. Plot the training data points
+for i = 1:numRules
+    idx = (hardAssign == i);
+    
+    scatter(xTrain(idx), yTrain(idx), 20, ...
+        ruleColors(i,:), 'filled', ...
+        'DisplayName', sprintf('Rule %d Data', i));
+end
+
+% 2. Overlay the GK cluster centers (centersXY)
+for i = 1:numRules
+    % Extract the X and Y coordinate for the i-th cluster center
+    centerX = centersXY(i, 1);
+    centerY = centersXY(i, 2);
+    
+    % Plot center as a larger, distinct marker with a black edge
+    plot(centerX, centerY, 'd', ...
+        'MarkerSize', 12, ...
+        'MarkerFaceColor', ruleColors(i,:), ...
+        'MarkerEdgeColor', 'k', ...
+        'LineWidth', 1.5, ...
+        'DisplayName', sprintf('Center %d', i));
+end
+
+xlabel('xTrain');
+ylabel('yTrain');
+title('Training data and GK Cluster Centers (centersXY)');
+grid on;
+legend('Location','best');
+
+%% new Data for LS Training
+
+
+function mu_inv = inverseDistance_man(x, c, m)
+    EPSILON = 1e-6;
+    distances = abs(x(:)' - c(:)); 
+    mu_inv = 1 ./ (distances.^m + EPSILON);
+end
+
+
+function Fi_norm = NormaliationOfMu(mu)
+    sumMu = sum(mu,1);
+
+    Fi_norm = mu ./ sumMu
+
+end
+
+
+%% Training data
+
+TimeOfPeriod = 1.2;       % Period of alternation (seconds)
+uBaseValue = 1.3;         % Baseline value
+amplitude = 0.4;        % How much it steps up/down from baseline
+
+u_vec = zeros(N,1);
+numSteps = ceil(t_vec(end) / TimeOfPeriod);
+
+for k = 1:numSteps
+
+    idx = (t_vec >= (k-1)*TimeOfPeriod) & (t_vec < k*TimeOfPeriod);
+
+    stepNoise = (2*rand - 1) * amplitude;
+
+    u_vec(idx) = uBaseValue + stepNoise;
+
+end
+
+
+disp('Začetek simulacije...');
+y_vec = pendulum_process_obf(u_vec, Ts);
+disp('Simulacija končana.');
+
+xTrain = u_vec;
+yTrain = y_vec(:,1);
+
+% 1. Compute your weights on the original input space
+mu_inv = inverseDistance_man(xTrain, centers(:,1), fuzziness);
+weights = NormaliationOfMu(mu_inv); % Size is (numRules x N)
+
+% 2. Align yTrain to have N-1 samples (from step 2 to N)
+yTrain_aligned = yTrain(2:end); 
+
+% 3. Form the Extended Regressor Matrix with N-1 rows and 3 columns
+% [u(k), u(k-1), 1]
+numSamples_aligned = length(yTrain_aligned); % This is N-1
+Xe = [xTrain(2:end), xTrain(1:end-1), ones(numSamples_aligned, 1)]; 
+
+% 4. Preallocate theta_local (Each rule needs 3 parameters: 2 slopes + 1 intercept)
+theta_local = zeros(numRules, 3); 
+
+% 5. Run the WLS loop
+for i = 1:numRules
+    wi = weights(i, 2:end); 
+    Wi = diag(wi); 
+    theta_local(i, :) = (Xe' * Wi * Xe) \ (Xe' * Wi * yTrain_aligned(:));
+end
+
+
+
+
+
+%% Prediction for local
+
+% 1. Align the true targets to match the evaluated time steps (N-1 samples)
+yTrain_aligned = yTrain(2:end);
+numSamples_aligned = length(yTrain_aligned);
+
+% 2. Re-form the exact extended regressor matrix used in training (Size: (N-1) x 3)
+% [u(k), u(k-1), 1]
+Xe = [xTrain(2:end), xTrain(1:end-1), ones(numSamples_aligned, 1)]; 
+
+% Initialize prediction vector for the N-1 steps
+y_pred = zeros(numSamples_aligned, 1);
+
+% 3. Compute the blended TS prediction
+for i = 1:numRules
+    % theta_local(i, :) contains [slope_uk, slope_uk1, intercept]
+    theta_i = theta_local(i, :);
+    
+    % Evaluate the local linear model for Rule i across all aligned steps
+    % (Xe * theta_i') gives an ((N-1) x 1) vector
+    y_local = Xe * theta_i';
+    
+    % Extract the matching membership weights for Rule i (steps 2 to end)
+    wi = weights(i, 2:end)'; 
+    
+    % Accumulate the weighted contribution of this rule to the final output
+    y_pred = y_pred + (wi .* y_local);
+end
+
+% 4. Evaluate the fit quality using the aligned true output
+mse = mean((yTrain_aligned(:) - y_pred).^2);
+fprintf('Model Prediction MSE: %.6f\n', mse);
+
+% 5. Plot the result vs True Data
+figure('Name', 'TS Model Prediction vs Actual Data', 'Color', 'w');
+% Plot the aligned true targets so they perfectly match your predictions step-for-step
+plot(yTrain_aligned, 'b', 'LineWidth', 1.5, 'DisplayName', 'True Pendulum Angle');
+hold on;
+plot(y_pred, 'r--', 'LineWidth', 1.5, 'DisplayName', 'TS Model Prediction');
+xlabel('Sample index (k - 1)');
+ylabel('Angle \phi (rad)');
+title('Fuzzy Model Output Verification (One-Step-Ahead)');
+legend('Location', 'best');
+grid on;
