@@ -5,7 +5,7 @@ clc
 
 pendulum_process_obf([], 0); 
 
-Ts = 0.06;              % Čas vzorčenja (s)
+Ts = 0.05;              % Čas vzorčenja (s)
 T_sim = 100;             % Skupni čas simulacije (s)
 N = ceil(T_sim / Ts);   % Število korakov
 t_vec = (0:N-1)' * Ts;  % Časovni vektor
@@ -24,10 +24,11 @@ kot_rad = y_vec(:, 1);
 hitrost_rad_s = y_vec(:, 2);
 kot_stopinje = kot_rad * 180 / pi;
 
+%%
 figure('Name', 'Simulacija nihala', 'Color', 'w');
 
 subplot(2, 1, 1);
-plot(t_vec, u_vec', 'LineWidth', 1.2);
+plot(t_vec(50:end), u_vec(50:end)', 'LineWidth', 1.2);
 ylabel('Navor (Nm)');
 title('Vhodni signal');
 grid on;
@@ -44,7 +45,7 @@ ylim([0, 110]);
 
 
 figure
-plot(u_vec,rad2deg(y_vec(:,1)) ,"*")
+plot(u_vec(50:end),rad2deg(y_vec(50:end,1)) ,"*")
 hold on;
 yline(10, 'r--', 'Spodnja meja (10°)');
 yline(100, 'r--', 'Zgornja meja (100°)');
@@ -54,10 +55,10 @@ grid on
 
 %% GK Optimization Loop (Updating given variables directly)
 
-xTrain = u_vec';
-yTrain = y_vec(:,1);
+xTrain = u_vec(50:end)';
+yTrain = y_vec(50:end,1);
 
-numRules = 7;
+numRules = 5;
 joint = [xTrain, yTrain];
 [numSamples, numDims] = size(joint);
 fuzziness = 2.0;
@@ -126,25 +127,30 @@ end
 % centers (1D projection from GK clusters)
 centers = centersXY(:,1);
 
-% estimate sigma (same idea as yours)
-sorted_centers = sort(centers);
-sigma = mean(diff(sorted_centers)) / 2;
+% Use the same fuzziness parameter from GK algorithm
+fuzziness = 2.0;  % Make sure this matches your GK fuzziness value
 
+numRules = size(centersXY, 1);  % Get number of rules from centersXY
 numSamples = length(xTrain);
 
-% Gaussian memberships (unnormalized)
+% Inverse distance memberships (unnormalized)
 muTrain = zeros(numRules, numSamples);
 
 for i = 1:numRules
-    muTrain(i,:) = exp(-(xTrain - centers(i)).^2 / (2*sigma^2));
+    % Calculate distance between each point and the center
+    distances = abs(xTrain - centers(i));
+    
+    % Inverse distance with fuzziness parameter
+    % Add small epsilon to avoid division by zero
+    muTrain(i,:) = 1 ./ (distances.^fuzziness + 1e-10);
 end
 
-% normalize memberships
-phiTrain = muTrain ./ sum(muTrain,1);
+% Normalize memberships (so they sum to 1 across rules)
+phiTrain = muTrain ./ sum(muTrain, 1);
 
 % ===== PLOT memberships =====
 
-figure('Name','Train Memberships','Color','w');
+figure('Name','Train Memberships (Inverse Distance)','Color','w');
 hold on;
 
 ruleColors = lines(numRules);
@@ -157,17 +163,16 @@ end
 
 xlabel('xTrain');
 ylabel('Membership degree');
-title('Normalized Gaussian Memberships (Training Set)');
+title('Normalized Inverse Distance Memberships (Training Set)');
 grid on;
 legend('Location','best');
 
-%
 % ===== Hard assignment from memberships =====
 [~, hardAssign] = max(phiTrain, [], 1);
 ruleColors = lines(numRules);
 
 % ===== Plot xTrain vs yTrain colored by rule =====
-figure('Name','Training data colored by membership','Color','w');
+figure('Name','Training data colored by membership (Inverse Distance)','Color','w');
 hold on;
 
 % 1. Plot the training data points
@@ -196,7 +201,7 @@ end
 
 xlabel('xTrain');
 ylabel('yTrain');
-title('Training data and GK Cluster Centers (centersXY)');
+title('Training data and GK Cluster Centers (Inverse Distance)');
 grid on;
 legend('Location','best');
 
@@ -218,8 +223,8 @@ t_vec = (0:N-1)' * Ts;  % Časovni vektor
 
 
 TimeOfPeriod = 1.5;       % Period of alternation (seconds)
-uBaseValue = 1.5;         % Baseline value
-amplitude = 0.5;        % How much it steps up/down from baseline
+uBaseValue = 1.7;         % Baseline value
+amplitude = 0.6;        % How much it steps up/down from baseline
 
 u_vec = zeros(N,1);
 numSteps = ceil(t_vec(end) / TimeOfPeriod);
@@ -234,6 +239,7 @@ for k = 1:numSteps
 
 end
 
+pendulum_process_obf([], 0);
 
 disp('Začetek simulacije...');
 y_vec = pendulum_process_obf(u_vec, Ts);
@@ -336,8 +342,8 @@ for i = 1:numRules
 end
 
 % 4. Evaluate the fit quality using the aligned true output
-mse_global_osa = mean((yTrain_aligned(:) - y_pred_global).^2);
-fprintf('Global Model Dynamic Prediction MSE: %.6f\n', mse_global_osa);
+mse_global_osa = mean((rad2deg(yTrain_aligned(:)) - rad2deg(y_pred_global)).^2);
+fprintf('Global Model Dynamic Prediction MSE (deg): %.6f\n', mse_global_osa);
 
 % 5. Plot the result vs True Data
 figure('Name', 'Global Dynamic TS Model Prediction vs Actual Data', 'Color', 'w');
@@ -395,8 +401,8 @@ end
 y_forecast_aligned = y_forecast(3:end);
 
 % MSE
-mse_global_forecast = mean((yTrain_aligned(:) - y_forecast_aligned(:)).^2);
-fprintf('Global Model Forecast MSE: %.6f\n', mse_global_forecast);
+mse_global_forecast = mean((rad2deg(yTrain_aligned(:)) - rad2deg(y_forecast_aligned(:))).^2);
+fprintf('Global Model Forecast MSE (deg): %.6f\n', mse_global_forecast);
 
 % Plot
 figure('Name','Global TS Model Forecast','Color','w');
@@ -502,8 +508,8 @@ for i = 1:numRules
 end
 
 % 4. Evaluate the fit quality using the aligned true output
-mse_global_osa = mean((yTrain_aligned(:) - y_pred_global).^2);
-fprintf('Global Model Dynamic Prediction MSE: %.6f\n', mse_global_osa);
+mse_global_osa = mean((rad2deg(yTrain_aligned(:)) - rad2deg(y_pred_global)).^2);
+fprintf('Global Model Dynamic Prediction MSE (deg): %.6f\n', mse_global_osa);
 
 % 5. Plot the result vs True Data
 figure('Name', 'Global Dynamic TS Model Prediction vs Actual Data', 'Color', 'w');
@@ -560,8 +566,8 @@ end
 y_forecast_aligned = y_forecast(3:end);
 
 % MSE
-mse_global_forecast = mean((yTrain_aligned(:) - y_forecast_aligned(:)).^2);
-fprintf('Global Model Forecast MSE: %.6f\n', mse_global_forecast);
+mse_global_forecast = mean((rad2deg(yTrain_aligned(:)) - rad2deg(y_forecast_aligned(:))).^2);
+fprintf('Global Model Forecast MSE (deg): %.6f\n', mse_global_forecast);
 
 % Plot
 figure('Name','Global TS Model Forecast','Color','w');

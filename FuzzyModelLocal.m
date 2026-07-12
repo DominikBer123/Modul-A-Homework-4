@@ -120,32 +120,36 @@ for iter = 1:maxIterations
         break;
     end
 end
-
 % ===== Membership on training data only =====
 
 % centers (1D projection from GK clusters)
 centers = centersXY(:,1);
 
-% estimate sigma (same idea as yours)
-sorted_centers = sort(centers);
-sigma = mean(diff(sorted_centers)) / 2;
+% Uporabimo fuzziness parameter iz GK algoritma
+% (isti kot pri izračunu uteži)
+fuzziness = 2.0;  % ali karkoli že imate definirano
 
 numRules = length(centers);
 numSamples = length(xTrain);
 
-% Gaussian memberships (unnormalized)
+% Inverse distance memberships (unnormalized)
 muTrain = zeros(numRules, numSamples);
 
 for i = 1:numRules
-    muTrain(i,:) = exp(-(xTrain - centers(i)).^2 / (2*sigma^2));
+    % Izračun razdalje med točkami in centrom
+    distances = abs(xTrain - centers(i));
+    
+    % Inverzna razdalja s fuzziness parametrom
+    % Dodamo majhen epsilon, da se izognemo deljenju z 0
+    muTrain(i,:) = 1 ./ (distances.^fuzziness + 1e-10);
 end
 
-% normalize memberships
-phiTrain = muTrain ./ sum(muTrain,1);
+% Normaliziraj pripadnosti (tako da vsota po pravilih = 1)
+phiTrain = muTrain ./ sum(muTrain, 1);
 
 % ===== PLOT memberships =====
 
-figure('Name','Train Memberships','Color','w');
+figure('Name','Train Memberships (Inverse Distance)','Color','w');
 hold on;
 
 ruleColors = lines(numRules);
@@ -158,17 +162,16 @@ end
 
 xlabel('xTrain');
 ylabel('Membership degree');
-title('Normalized Gaussian Memberships (Training Set)');
+title('Normalized Inverse Distance Memberships (Training Set)');
 grid on;
 legend('Location','best');
 
-%
 % ===== Hard assignment from memberships =====
 [~, hardAssign] = max(phiTrain, [], 1);
 ruleColors = lines(numRules);
 
 % ===== Plot xTrain vs yTrain colored by rule =====
-figure('Name','Training data colored by membership','Color','w');
+figure('Name','Training data colored by membership (Inverse Distance)','Color','w');
 hold on;
 
 % 1. Plot the training data points
@@ -197,7 +200,7 @@ end
 
 xlabel('xTrain');
 ylabel('yTrain');
-title('Training data and GK Cluster Centers (centersXY)');
+title('Training data and GK Cluster Centers (Inverse Distance)');
 grid on;
 legend('Location','best');
 
@@ -218,9 +221,9 @@ N = ceil(T_sim / Ts);   % Število korakov
 t_vec = (0:N-1)' * Ts;  % Časovni vektor
 
 
-TimeOfPeriod = 1.5;       % Period of alternation (seconds)
-uBaseValue = 1.5;         % Baseline value
-amplitude = 0.5;        % How much it steps up/down from baseline
+TimeOfPeriod = 1.2;       % Period of alternation (seconds)
+uBaseValue = 1.7;         % Baseline value
+amplitude = 0.8; 
 
 u_vec = zeros(N,1);
 numSteps = ceil(t_vec(end) / TimeOfPeriod);
@@ -324,8 +327,8 @@ for i = 1:numRules
 end
 
 % 4. Evaluate the fit quality using the aligned true output
-mse = mean((yTrain_aligned(:) - y_pred).^2);
-fprintf('Model Dynamic Prediction MSE: %.6f\n', mse);
+mse = mean((rad2deg(yTrain_aligned(:)) - rad2deg(y_pred)).^2);
+fprintf('Model Dynamic Prediction MSE (Deg): %.6f\n', mse);
 
 % 5. Plot the result vs True Data
 figure('Name', 'Dynamic TS Model Prediction vs Actual Data', 'Color', 'w');
@@ -388,8 +391,8 @@ yTrain_aligned = y(3:end);
 y_forecast_aligned = y_forecast(3:end);
 
 % 4. Evaluate forecasting fit quality
-mse_forecast = mean((yTrain_aligned(:) - y_forecast_aligned(:)).^2);
-fprintf('Model Free-Run Forecast MSE: %.6f\n', mse_forecast);
+mse_forecast = mean((rad2deg(yTrain_aligned(:)) - rad2deg(y_forecast_aligned(:))).^2);
+fprintf('Model Free-Run Forecast MSE (deg): %.6f\n', mse_forecast);
 
 % 5. Plot the full simulation forecasting response
 figure('Name', 'TS Model Free-Run Forecast vs Actual Data', 'Color', 'w');
@@ -481,8 +484,8 @@ for i = 1:numRules
 end
 
 % 4. Evaluate the fit quality using the aligned true output
-mse = mean((yTrain_aligned(:) - y_pred).^2);
-fprintf('Model Dynamic Prediction MSE: %.6f\n', mse);
+mse = mean((rad2deg(yTrain_aligned(:)) - rad2deg(y_pred)).^2);
+fprintf('Model Dynamic Prediction MSE (deg): %.6f\n', mse);
 
 % 5. Plot the result vs True Data
 figure('Name', 'Dynamic TS Model Prediction vs Actual Data', 'Color', 'w');
@@ -545,8 +548,8 @@ yTrain_aligned = y(3:end);
 y_forecast_aligned = y_forecast(3:end);
 
 % 4. Evaluate forecasting fit quality
-mse_forecast = mean((yTrain_aligned(:) - y_forecast_aligned(:)).^2);
-fprintf('Model Free-Run Forecast MSE: %.6f\n', mse_forecast);
+mse_forecast = mean((rad2deg(yTrain_aligned(:)) - rad2deg(y_forecast_aligned(:))).^2);
+fprintf('Model Free-Run Forecast MSE (deg): %.6f\n', mse_forecast);
 
 % 5. Plot the full simulation forecasting response
 figure('Name', 'TS Model Free-Run Forecast vs Actual Data', 'Color', 'w');

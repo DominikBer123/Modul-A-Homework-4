@@ -72,8 +72,8 @@ grid on
 figure
 plot(u_vec,rad2deg(y_vec(:,1)),"*")
 grid on;
-xlabel('Angle');
-ylabel('U Response');
+ylabel('Angle');
+xlabel('U Response');
 hold on;
 yline(10, 'r--', 'Spodnja meja (10°)');
 yline(100, 'r--', 'Zgornja meja (100°)');
@@ -89,15 +89,15 @@ grid on;
 % Reset
 pendulum_process_obf([], 0); 
 
-Ts = 0.07;              % Čas vzorčenja (s)
+Ts = 0.05;              % Čas vzorčenja (s)
 T_sim = 100;             % Skupni čas simulacije (s)
 N = ceil(T_sim / Ts);   % Število korakov
 t_vec = (0:N-1)' * Ts;  % Časovni vektor
 
 
 TimeOfPeriod = 1.2;       % Period of alternation (seconds)
-uBaseValue = 1.3;         % Baseline value
-amplitude = 0.4;        % How much it steps up/down from baseline
+uBaseValue = 1.7;         % Baseline value
+amplitude = 0.8;        % How much it steps up/down from baseline
 
 u_vec = zeros(N,1);
 numSteps = ceil(t_vec(end) / TimeOfPeriod);
@@ -210,36 +210,9 @@ function y_hat = predictModel(theta, u, y_init)
     end
 end
 
-% --- VALIDATION TEST ---             
-T_sim = 30;             
-N = ceil(T_sim / Ts);   
-t_vec = (0:N-1)' * Ts;  
-u_vec = (sin(t_vec) > 0) * amplitude+ uBaseValue; % Square wave around your operating point
-
-fprintf('\nZačetek verifikacijske simulacije...');
-pendulum_process_obf([], 0); % Reset process
-y_vec = pendulum_process_obf(u_vec, Ts);
-fprintf('\nSimulacija končana.');
-
-% 1. Pass the true initial measurements (y_vec(1:2)) to the prediction function
-y_hat = predictModel(theta, u_vec, y_vec(:,1));
-
-% 2. Convert both to degrees for plotting and analysis
-y_true_deg = rad2deg(y_vec(:, 1));
-y_pred_deg = rad2deg(y_hat);
-
-% Plot the entire horizon
-figure;
-plot(t_vec, y_true_deg, 'b', 'LineWidth', 1.5); hold on;
-plot(t_vec, y_pred_deg, 'r--', 'LineWidth', 1.5);
-grid on;
-xlabel('Time (s)');
-ylabel('Output y (°)');
-legend('True process output', 'Free-run Model prediction');
-title('Model Validation (Free-Run Simulation)');
 
 % Accurate RMSE Calculation
-rmse = sqrt(mean((y_true_deg - y_pred_deg).^2));
+rmse = sqrt(mean((rad2deg(y_train) - rad2deg(y_hat)).^2));
 fprintf('\n\nValidation RMSE = %.4f degrees\n\n', rmse);
 
 
